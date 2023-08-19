@@ -12,6 +12,7 @@ default_arg = {
     'output': 2,
     'ifm': None,
     'osf': '127.0.0.1:11573',
+    'vmc': '127.0.0.1:39539',
     'is_extend_movement': False,
     'is_anime4k': False,
     'is_alpha_split': False,
@@ -56,6 +57,7 @@ def launch():
         'output': output.get(),
         'ifm': ifm.get(),
         'osf': osf.get(),
+        'vmc': vmc.get(),
         'is_extend_movement': is_extend_movement.get(),
         'is_anime4k': is_anime4k.get(),
         'is_alpha_split': is_alpha_split.get(),
@@ -73,6 +75,10 @@ def launch():
     if args['input'] == 4:
         if len(args['osf']) == 0:
             tkinter.messagebox.showinfo('EasyVtuber Launcher', 'Please Input OpenSeeFace IP:Port')
+            return
+    if args['input'] == 5:
+        if len(args['vmc']) == 0:
+            tkinter.messagebox.showinfo('EasyVtuber Launcher', 'Please Input OSC/VMC Protocol IP:Port')
             return
 
     f = open('launcher.json', mode='w')
@@ -105,6 +111,10 @@ def launch():
             if len(args['osf']):
                 run_args.append('--osf')
                 run_args.append(args['osf'])
+        elif args['input'] == 5:
+            if len(args['vmc']):
+                run_args.append('--vmc')
+                run_args.append(args['vmc'])
 
         if args['output'] == 0:
             run_args.append('--output_webcam')
@@ -173,25 +183,39 @@ def inputChange():
         ifmEnt.pack(fill='x', expand=True)
         osfLbl.pack_forget()
         osfEnt.pack_forget()
+        vmcLbl.pack_forget()
+        vmcEnt.pack_forget()
     elif i==4:
         ifmLbl.pack_forget()
         ifmEnt.pack_forget()
         osfLbl.pack(fill='x', expand=True)
         osfEnt.pack(fill='x', expand=True)
+        vmcLbl.pack_forget()
+        vmcEnt.pack_forget()
+    elif i==5:
+        ifmLbl.pack_forget()
+        ifmEnt.pack_forget()
+        osfLbl.pack_forget()
+        osfEnt.pack_forget()
+        vmcLbl.pack(fill='x', expand=True)
+        vmcEnt.pack(fill='x', expand=True)
     else:
         ifmLbl.pack_forget()
         ifmEnt.pack_forget()
         osfLbl.pack_forget()
         osfEnt.pack_forget()
+        vmcLbl.pack_forget()
+        vmcEnt.pack_forget()
         frameLTxt.configure(height=0)
 input = tk.IntVar(value=args['input'])
 ttk.Label(frameL, text="Face Data Source").pack(fill='x', expand=True)
 ttk.Radiobutton(frameL, text='iFacialMocap', value=0, variable=input, command=inputChange).pack(fill='x', expand=True)
 ttk.Radiobutton(frameL, text='OpenSeeFace', value=4, variable=input, command=inputChange).pack(fill='x', expand=True)
+ttk.Radiobutton(frameL, text='OSC/VMC Protocol', value=5, variable=input, command=inputChange).pack(fill='x', expand=True)
 ttk.Radiobutton(frameL, text='Webcam(opencv)', value=1, variable=input, command=inputChange).pack(fill='x', expand=True)
 ttk.Radiobutton(frameL, text='Mouse Input', value=3, variable=input, command=inputChange).pack(fill='x', expand=True)
-ttk.Radiobutton(frameL, text='Initial Debug Input', value=2, variable=input, command=inputChange).pack(fill='x',
-                                                                                                       expand=True)
+ttk.Radiobutton(frameL, text='Initial Debug Input', value=2, variable=input, command=inputChange).pack(fill='x', expand=True)
+
 frameLTxt = ttk.Frame(frameL)
 frameLTxt.pack(fill='x', expand=True)
 ifmLbl = ttk.Label(frameLTxt, text="iFacialMocap IP:Port")
@@ -206,6 +230,12 @@ osfLbl.pack(fill='x', expand=True)
 osf = tk.StringVar(value=args['osf'])
 osfEnt = ttk.Entry(frameLTxt, textvariable=osf, state=False)
 osfEnt.pack(fill='x', expand=True)
+
+vmcLbl = ttk.Label(frameLTxt, text="OSC/VMC Protocol IP:Port")
+vmcLbl.pack(fill='x', expand=True)
+vmc = tk.StringVar(value=args['vmc'])
+vmcEnt = ttk.Entry(frameLTxt, textvariable=vmc, state=False)
+vmcEnt.pack(fill='x', expand=True)
 inputChange()
 
 ttk.Label(frameR, text="Model Simplify").pack(fill='x', expand=True)

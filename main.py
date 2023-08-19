@@ -35,11 +35,12 @@ from tha3.util import torch_linear_to_srgb, resize_PIL_image, extract_PIL_image_
 
 import collections
 
+from pythonosc.dispatcher import Dispatcher
+from pythonosc.osc_server import BlockingOSCUDPServer
 
 def convert_linear_to_srgb(image: torch.Tensor) -> torch.Tensor:
     rgb_image = torch_linear_to_srgb(image[0:3, :, :])
     return torch.cat([rgb_image, image[3:4, :, :]], dim=0)
-
 
 class FPS:
     def __init__(self, avarageof=50):
@@ -185,6 +186,102 @@ class OSFClientProcess(Process):
         self.queue.close()
         self.socket.close()
 
+class VMCQueueData():
+    def __init__(self):
+        self.eyebrow_vector_c = [0.0] * 12
+        self.mouth_eye_vector_c = [0.0] * 27
+        self.pose_vector_c = [0.0] * 6
+        self.position_vector = [0, 0, 0, 1]
+
+# VMCClientProcess Class
+class VMCClientProcess(Process):
+    def __init__(self):
+        super().__init__()
+        self.queue = Queue()
+        self.should_terminate = Value('b', False)
+        self.address = args.vmc.split(':')[0]
+        self.port = int(args.vmc.split(':')[1])
+        self.data = VMCQueueData()
+
+    @staticmethod
+    def clamp(x, min_value, max_value):
+        return max(min_value, min(max_value, x))
+
+    def parse_root_transform(self, *elements):
+        name = elements[1]
+        pos_x = float(elements[2])
+        pos_y = float(elements[3])
+        pos_z = float(elements[4])
+        quat_x = float(elements[5])
+        quat_y = float(elements[6])
+        quat_z = float(elements[7])
+        quat_w = float(elements[8])
+        if len(elements) > 9:
+            scale_x = float(elements[9])
+            scale_y = float(elements[10])
+            scale_z = float(elements[11])
+            offset_x = float(elements[12])
+            offset_y = float(elements[13])
+            offset_z = float(elements[14])
+        else:
+            scale_x = scale_y = scale_z = 1.0
+            offset_x = offset_y = offset_z = 0.0
+
+    def parse_bone_transform(self, address, *elements):
+        name = elements[0]
+        pos_x = float(elements[1])
+        pos_y = float(elements[2])
+        pos_z = float(elements[3])
+        quat_x = float(elements[4])
+        quat_y = float(elements[5])
+        quat_z = float(elements[6])
+        quat_w = float(elements[7])
+
+        if name == "Head":
+            self.data.pose_vector_c[0] = self.clamp(-quat_x * 180.0 / math.pi * 3, -15.0, 15.0) / 15.0
+            self.data.pose_vector_c[1] = self.clamp(quat_y * 180.0 / math.pi * 3, -15.0, 15.0) / 15.0
+            self.data.pose_vector_c[2] = self.clamp(-quat_z * 180.0 / math.pi * 3, -15.0, 15.0) / 15.0
+        if name == "LeftEye":
+            self.data.mouth_eye_vector_c[25] = quat_x
+            self.data.mouth_eye_vector_c[26] = quat_y
+
+    def parse_blend_shape_value(self, address, name, value):
+        if name == "Blink_L" or name == "Blink":
+            self.data.mouth_eye_vector_c[2] += value
+        if name == "Blink_R" or name == "Blink":
+            self.data.mouth_eye_vector_c[3] += value
+        if name == "A":
+            self.data.mouth_eye_vector_c[14] += value
+        if name == "I":
+            self.data.mouth_eye_vector_c[15] += value
+        if name == "U":
+            self.data.mouth_eye_vector_c[16] += value
+        if name == "E":
+            self.data.mouth_eye_vector_c[17] += value
+        if name == "O":
+            self.data.mouth_eye_vector_c[18] += value
+        if name == "LookLeft":
+            self.data.mouth_eye_vector_c[25] -= value
+        if name == "LookRight":
+            self.data.mouth_eye_vector_c[25] += value
+        if name == "LookUp":
+            self.data.mouth_eye_vector_c[26] += value
+        if name == "LookDown":
+            self.data.mouth_eye_vector_c[26] -= value
+
+    def push_data_to_queue(self, address, *args):
+        self.queue.put_nowait(self.data)
+        self.data = VMCQueueData()
+
+    def run(self):
+        dispatcher = Dispatcher()
+        dispatcher.map("/VMC/Ext/Bone/Pos", lambda *args: self.parse_bone_transform(*args))
+        dispatcher.map("/VMC/Ext/Blend/Val", lambda *args: self.parse_blend_shape_value(*args))
+        dispatcher.map("/VMC/Ext/OK", lambda *args: self.push_data_to_queue(*args))
+
+        server = BlockingOSCUDPServer((self.address, self.port), dispatcher)
+        server.serve_forever()
+        self.queue.close()
 
 ifm_converter = tha2.poser.modes.mode_20_wx.IFacialMocapPoseConverter20()
 
@@ -563,6 +660,12 @@ def main():
             client_process.daemon = True
             client_process.start()
             print("OpenSeeFace Service Running:", args.osf)
+        
+        elif args.vmc is not None:
+            client_process = VMCClientProcess()
+            client_process.daemon = True
+            client_process.start()
+            print("VMCClientProcess Running:", args.vmc)
 
         elif args.mouse_input is not None:
             client_process = MouseClientProcess()
@@ -625,8 +728,10 @@ def main():
 
     pose_queue = []
     blender_data={}
-    if(args.ifm):
+    if args.ifm:
         blender_data = create_default_blender_data()
+    if args.vmc:
+        blender_data = VMCQueueData()
     mouse_data = {
         'eye_l_h_temp': 0,
         'eye_r_h_temp': 0,
@@ -720,6 +825,21 @@ def main():
                 position_vector[1] = -(blender_data['translationY']-position_vector_0[1])*0.1
                 position_vector[2] = -(blender_data['translationZ']-position_vector_0[2])*0.1
 
+        elif args.vmc is not None:
+            # get pose from vmc(ifm format)
+            try:
+                new_blender_data = blender_data
+                while not client_process.should_terminate.value and not client_process.queue.empty():
+                    new_blender_data = client_process.queue.get_nowait()
+                blender_data = new_blender_data
+            except queue.Empty:
+                pass
+
+            eyebrow_vector_c = blender_data.eyebrow_vector_c
+            mouth_eye_vector_c = blender_data.mouth_eye_vector_c
+            pose_vector_c = blender_data.pose_vector_c
+            position_vector = blender_data.position_vector
+            
         elif args.ifm is not None:
             # get pose from ifm
             try:
